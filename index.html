@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BFS — обход графа в ширину</title>
+<style>
+  :root {
+    --bg:        #0d1117;
+    --panel:     #161b27;
+    --panel-2:   #1d2433;
+    --border:    #2a3344;
+    --text:      #e6edf3;
+    --muted:     #8b97a8;
+    --default:   #232b3a;
+    --stroke:    #3a4456;
+    --queue:     #f5b342;   /* в очереди */
+    --current:   #22d3ee;   /* текущая вершина */
+    --done:      #818cf8;   /* обработана */
+    --tree:      #6366f1;   /* ребро дерева обхода */
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: radial-gradient(1200px 600px at 50% -10%, #182236 0%, var(--bg) 60%);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 24px;
+  }
+
+  header { text-align: center; margin-bottom: 20px; }
+  header h1 {
+    margin: 0;
+    font-size: 26px;
+    letter-spacing: .3px;
+    background: linear-gradient(90deg, var(--current), var(--done));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  header p { margin: 6px 0 0; color: var(--muted); font-size: 14px; }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    gap: 18px;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+  @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 16px;
+    box-shadow: 0 10px 30px rgba(0,0,0,.35);
+  }
+
+  svg { width: 100%; height: auto; display: block; }
+
+  /* --- рёбра --- */
+  .edge       { stroke: var(--stroke); stroke-width: 2.5; transition: stroke .3s, stroke-width .3s; }
+  .edge.tree  { stroke: var(--tree); stroke-width: 4; }
+  .edge.active{ stroke: var(--current); stroke-width: 5; }
+
+  /* --- вершины --- */
+  .node circle {
+    fill: var(--default);
+    stroke: var(--stroke);
+    stroke-width: 3;
+    transition: fill .35s, stroke .35s, stroke-width .35s;
+  }
+  .node text {
+    fill: var(--text);
+    font-weight: 700;
+    font-size: 18px;
+    text-anchor: middle;
+    dominant-baseline: central;
+    pointer-events: none;
+  }
+  .node.queue   circle { fill: var(--queue);   stroke: #ffd277; }
+  .node.done    circle { fill: var(--done);    stroke: #a5b0ff; }
+  .node.current circle { fill: var(--current); stroke: #7ff0ff; stroke-width: 4; }
+  .node.current { animation: pulse 1.1s ease-in-out infinite; }
+  @keyframes pulse {
+    0%,100% { filter: drop-shadow(0 0 2px var(--current)); }
+    50%     { filter: drop-shadow(0 0 12px var(--current)); }
+  }
+
+  /* --- очередь --- */
+  .section-title { font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin: 0 0 10px; }
+
+  .queue-wrap { background: var(--panel-2); border: 1px solid var(--border); border-radius: 12px; padding: 12px; margin-bottom: 16px; }
+  .queue-row { display: flex; align-items: center; gap: 8px; min-height: 50px; flex-wrap: wrap; }
+  .queue-box {
+    width: 42px; height: 42px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--queue); color: #1a1407;
+    font-weight: 800; font-size: 18px;
+    border-radius: 10px;
+    box-shadow: 0 4px 10px rgba(245,179,66,.3);
+    animation: pop .3s ease;
+  }
+  @keyframes pop { from { transform: scale(.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  .queue-empty { color: var(--muted); font-style: italic; font-size: 14px; }
+  .queue-ends { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: 8px; }
+
+  .order-box { background: var(--panel-2); border: 1px solid var(--border); border-radius: 12px; padding: 12px; }
+  .order-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .order-chip { background: var(--done); color: #0d1117; font-weight: 700; padding: 4px 10px; border-radius: 8px; font-size: 14px; }
+
+  /* --- история шагов (лог) --- */
+  .log-title { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 16px 0 10px; }
+  .log-title .section-title { margin: 0; }
+  .log-counter { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  .log {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 8px;
+    max-height: 360px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    scroll-behavior: smooth;
+  }
+  .log::-webkit-scrollbar { width: 8px; }
+  .log::-webkit-scrollbar-thumb { background: var(--border); border-radius: 8px; }
+
+  .log-entry {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--stroke);
+    border-radius: 8px;
+    padding: 8px 10px;
+    cursor: pointer;
+    transition: border-color .2s, background .2s, transform .05s;
+  }
+  .log-entry:hover { background: #1b2230; }
+  .log-entry:active { transform: translateY(1px); }
+  .log-entry.current {
+    border-left-color: var(--current);
+    background: #16202c;
+    box-shadow: 0 0 0 1px rgba(34,211,238,.35);
+  }
+  .log-entry.enter { animation: logIn .3s ease; }
+  @keyframes logIn { from { opacity: 0; transform: translateX(-10px); } to { opacity: 1; transform: none; } }
+
+  .log-head { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+  .log-num { font-size: 12px; color: var(--muted); font-weight: 700; font-variant-numeric: tabular-nums; }
+  .log-tag {
+    font-size: 10px; text-transform: uppercase; letter-spacing: .6px;
+    font-weight: 800; padding: 2px 8px; border-radius: 6px;
+  }
+  .log-tag.start   { color: #34d399;        background: rgba(52,211,153,.15); }
+  .log-tag.dequeue { color: var(--current); background: rgba(34,211,238,.15); }
+  .log-tag.enqueue { color: var(--queue);   background: rgba(245,179,66,.15); }
+  .log-tag.skip    { color: var(--muted);   background: rgba(139,151,168,.15); }
+  .log-tag.done    { color: var(--done);    background: rgba(129,140,248,.20); }
+
+  .log-text { font-size: 13px; line-height: 1.4; color: var(--text); }
+  .log-queue { display: flex; align-items: center; gap: 4px; margin-top: 7px; flex-wrap: wrap; }
+  .log-qbox {
+    font-size: 11px; min-width: 18px; height: 18px; padding: 0 4px;
+    display: flex; align-items: center; justify-content: center;
+    background: #2a3344; border-radius: 4px; color: var(--text); font-weight: 700;
+  }
+  .log-empty { color: var(--muted); font-style: italic; font-size: 11px; }
+
+  /* --- отладчик: код + переменные --- */
+  .debugger { margin-top: 18px; }
+  .dbg-sub { color: var(--muted); font-size: 12px; margin: -4px 0 10px; }
+  .dbg-body { display: flex; gap: 12px; align-items: stretch; }
+  @media (max-width: 720px) { .dbg-body { flex-direction: column; } }
+
+  .code {
+    flex: 1; min-width: 0;
+    background: #0b0f17;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 10px 0;
+    font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+    font-size: 13px; line-height: 1.6;
+    overflow-x: auto;
+  }
+  .code-line { display: flex; white-space: pre; border-left: 3px solid transparent; transition: background .2s; }
+  .code-line .gutter { flex: none; width: 46px; padding-right: 10px; text-align: right; color: #455066; user-select: none; }
+  .code-line .arrow { color: var(--current); margin-right: 4px; opacity: 0; }
+  .code-line.active { background: rgba(34,211,238,.07); border-left-color: rgba(34,211,238,.35); }
+  .code-line.cursor { background: rgba(34,211,238,.16); border-left-color: var(--current); }
+  .code-line.cursor .arrow { opacity: 1; }
+  .code-txt { padding-right: 14px; }
+  .code-txt .kw { color: #ff7b72; }
+  .code-txt .bi { color: #79c0ff; }
+  .code-txt .cm { color: #7d8db1; font-style: italic; }
+
+  .vars {
+    flex: none; width: 210px;
+    background: #0b0f17;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 10px 12px;
+    font-family: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12.5px;
+  }
+  @media (max-width: 720px) { .vars { width: auto; } }
+  .vars-title { font-size: 10px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin-bottom: 8px; }
+  .var-row { display: flex; gap: 6px; padding: 4px 6px; border-radius: 6px; margin: 2px 0; }
+  .var-name { color: #d2a8ff; flex: none; }
+  .var-val { color: var(--text); word-break: break-all; }
+  .var-row.changed { animation: varFlash .7s ease; }
+  @keyframes varFlash { from { background: rgba(245,179,66,.4); } to { background: transparent; } }
+
+  /* --- управление --- */
+  .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 16px; justify-content: center; }
+  button {
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 10px;
+    padding: 10px 16px; font-size: 14px; font-weight: 600; cursor: pointer;
+    transition: background .2s, transform .05s;
+  }
+  button:hover:not(:disabled) { background: #283246; }
+  button:active:not(:disabled) { transform: translateY(1px); }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  button.primary { background: linear-gradient(90deg, var(--current), var(--done)); color: #08111c; border: none; }
+  select { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 10px; padding: 9px 12px; font-size: 14px; }
+  label { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  input[type=range] { accent-color: var(--current); }
+
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; margin-top: 14px; font-size: 13px; color: var(--muted); }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .dot { width: 14px; height: 14px; border-radius: 4px; display: inline-block; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Обход графа в ширину (BFS)</h1>
+    <p>Пошаговая визуализация очереди: подсветка текущей вершины и её соседей</p>
+  </header>
+
+  <div class="layout">
+    <!-- Граф -->
+    <div class="card">
+      <svg viewBox="0 0 800 480" id="svg"></svg>
+      <div class="legend">
+        <span><i class="dot" style="background:var(--current)"></i> текущая</span>
+        <span><i class="dot" style="background:var(--queue)"></i> в очереди</span>
+        <span><i class="dot" style="background:var(--done)"></i> обработана</span>
+        <span><i class="dot" style="background:var(--tree)"></i> ребро обхода</span>
+      </div>
+
+      <div class="debugger">
+        <p class="section-title">Как Python читает код</p>
+        <p class="dbg-sub">Стрелка ▶ — строка, которую Python выполняет на текущем шаге.</p>
+        <div class="dbg-body">
+          <div class="code" id="code"></div>
+          <div class="vars" id="vars"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Панель -->
+    <div class="card">
+      <p class="section-title">Очередь (FIFO)</p>
+      <div class="queue-wrap">
+        <div class="queue-row" id="queue"></div>
+        <div class="queue-ends">
+          <span>← начало (отсюда извлекаем)</span>
+          <span>конец (сюда добавляем) →</span>
+        </div>
+      </div>
+
+      <div class="order-box">
+        <p class="section-title" style="margin:0">Порядок обхода</p>
+        <div class="order-list" id="order"></div>
+      </div>
+
+      <div class="log-title">
+        <p class="section-title">История шагов</p>
+        <span class="log-counter" id="counter"></span>
+      </div>
+      <div class="log" id="log"></div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <label>Старт:
+      <select id="start"></select>
+    </label>
+    <button id="prev">◀ Назад</button>
+    <button id="play" class="primary">▶ Авто</button>
+    <button id="next">Дальше ▶</button>
+    <button id="reset">⟲ Сброс</button>
+    <label>Скорость:
+      <input type="range" id="speed" min="300" max="2000" value="900" step="100">
+    </label>
+  </div>
+
+<script>
+// ====== Граф (тот же, что и в bfs.py) ======
+const graph = {
+  A: ['B','C'], B: ['A','D','E'], C: ['A','F','G'],
+  D: ['B','H'], E: ['B','H'], F: ['C'], G: ['C','H'], H: ['D','E','G'],
+};
+const pos = {
+  A:[400,60], B:[250,160], C:[550,160], D:[150,300],
+  E:[330,300], F:[480,300], G:[650,300], H:[400,420],
+};
+
+// ====== Генерация шагов BFS (логика повторяет bfs.py) ======
+function buildSteps(start) {
+  const steps = [];
+  const visited = new Set([start]);   // помеченные вершины
+  const queue = [start];
+  const tree = new Set();             // рёбра дерева обхода
+  const order = [];                   // порядок обработки
+
+  steps.push(snapshot(null, null, `Старт: добавляем «${start}» в очередь.`, 'start'));
+
+  while (queue.length) {
+    const node = queue.shift();       // берём из начала очереди
+    order.push(node);
+    steps.push(snapshot(node, null, `Извлекаем «${node}» из начала очереди и обрабатываем её.`, 'dequeue'));
+
+    for (const nb of graph[node]) {
+      if (!visited.has(nb)) {
+        visited.add(nb);
+        queue.push(nb);               // добавляем в конец очереди
+        tree.add(edgeKey(node, nb));
+        steps.push(snapshot(node, [node, nb],
+          `Сосед «${nb}» ещё не посещён → добавляем в конец очереди.`, 'enqueue'));
+      } else {
+        steps.push(snapshot(node, [node, nb],
+          `Сосед «${nb}» уже посещён → пропускаем.`, 'skip'));
+      }
+    }
+  }
+  steps.push(snapshot(null, null, `Готово! Все достижимые вершины обойдены.`, 'done'));
+  return steps;
+
+  function snapshot(current, edge, msg, type) {
+    return {
+      current,
+      edge,
+      msg,
+      type,
+      queue: [...queue],
+      visited: new Set(visited),
+      tree: new Set(tree),
+      order: [...order],
+    };
+  }
+}
+
+function edgeKey(a, b) { return [a, b].sort().join('-'); }
+
+// ====== Построение SVG ======
+const svg = document.getElementById('svg');
+const SVGNS = 'http://www.w3.org/2000/svg';
+const edgeEls = {};   // key -> <line>
+const nodeEls = {};   // name -> <g>
+
+function drawGraph() {
+  svg.innerHTML = '';
+  const drawn = new Set();
+  // рёбра (рисуем первыми, чтобы были под вершинами)
+  for (const a in graph) {
+    for (const b of graph[a]) {
+      const key = edgeKey(a, b);
+      if (drawn.has(key)) continue;
+      drawn.add(key);
+      const line = document.createElementNS(SVGNS, 'line');
+      line.setAttribute('x1', pos[a][0]); line.setAttribute('y1', pos[a][1]);
+      line.setAttribute('x2', pos[b][0]); line.setAttribute('y2', pos[b][1]);
+      line.setAttribute('class', 'edge');
+      svg.appendChild(line);
+      edgeEls[key] = line;
+    }
+  }
+  // вершины
+  for (const name in pos) {
+    const g = document.createElementNS(SVGNS, 'g');
+    g.setAttribute('class', 'node');
+    const c = document.createElementNS(SVGNS, 'circle');
+    c.setAttribute('cx', pos[name][0]); c.setAttribute('cy', pos[name][1]); c.setAttribute('r', 26);
+    const t = document.createElementNS(SVGNS, 'text');
+    t.setAttribute('x', pos[name][0]); t.setAttribute('y', pos[name][1]);
+    t.textContent = name;
+    g.appendChild(c); g.appendChild(t);
+    svg.appendChild(g);
+    nodeEls[name] = g;
+  }
+}
+
+// ====== Отрисовка состояния ======
+function render(step) {
+  // вершины
+  for (const name in nodeEls) {
+    let cls = 'node';
+    if (step.current === name) cls += ' current';
+    else if (step.queue.includes(name)) cls += ' queue';
+    else if (step.visited.has(name)) cls += ' done';
+    nodeEls[name].setAttribute('class', cls);
+  }
+  // рёбра
+  for (const key in edgeEls) {
+    let cls = 'edge';
+    if (step.tree.has(key)) cls += ' tree';
+    if (step.edge && edgeKey(step.edge[0], step.edge[1]) === key) cls += ' active';
+    edgeEls[key].setAttribute('class', cls);
+  }
+  // очередь
+  const q = document.getElementById('queue');
+  q.innerHTML = '';
+  if (step.queue.length === 0) {
+    q.innerHTML = '<span class="queue-empty">очередь пуста</span>';
+  } else {
+    step.queue.forEach(v => {
+      const box = document.createElement('div');
+      box.className = 'queue-box';
+      box.textContent = v;
+      q.appendChild(box);
+    });
+  }
+  // порядок обхода
+  const o = document.getElementById('order');
+  o.innerHTML = '';
+  step.order.forEach(v => {
+    const chip = document.createElement('span');
+    chip.className = 'order-chip';
+    chip.textContent = v;
+    o.appendChild(chip);
+  });
+}
+
+// ====== История шагов (накапливается по очереди) ======
+const TAG_LABELS = { start: 'старт', dequeue: 'извлечь', enqueue: 'в очередь', skip: 'пропуск', done: 'готово' };
+
+function renderLog() {
+  const log = document.getElementById('log');
+  log.innerHTML = '';
+  for (let i = 0; i <= idx; i++) {
+    const s = steps[i];
+    const entry = document.createElement('div');
+    entry.className = 'log-entry' + (i === idx ? ' current enter' : '');
+    entry.dataset.idx = i;
+
+    const head = document.createElement('div');
+    head.className = 'log-head';
+    const num = document.createElement('span');
+    num.className = 'log-num';
+    num.textContent = '#' + (i + 1);
+    const tag = document.createElement('span');
+    tag.className = 'log-tag ' + s.type;
+    tag.textContent = TAG_LABELS[s.type] || s.type;
+    head.append(num, tag);
+
+    const text = document.createElement('div');
+    text.className = 'log-text';
+    text.textContent = s.msg;
+
+    const q = document.createElement('div');
+    q.className = 'log-queue';
+    const lab = document.createElement('span');
+    lab.className = 'log-empty';
+    if (s.queue.length === 0) {
+      lab.textContent = 'очередь пуста';
+      q.appendChild(lab);
+    } else {
+      lab.textContent = 'очередь:';
+      q.appendChild(lab);
+      s.queue.forEach(v => {
+        const b = document.createElement('span');
+        b.className = 'log-qbox';
+        b.textContent = v;
+        q.appendChild(b);
+      });
+    }
+
+    entry.append(head, text, q);
+    log.appendChild(entry);
+  }
+  log.scrollTop = log.scrollHeight;   // прокрутка к текущему (последнему) шагу
+}
+
+// ====== Отладчик: подсветка строки кода и значения переменных ======
+const CODE = [
+  'def bfs(graph, start):',
+  '    visited = {start}          # set: проверка за O(1)',
+  '    order = [start]            # порядок обхода',
+  '    queue = deque([start])',
+  '',
+  '    while queue:',
+  '        node = queue.popleft()',
+  '        for neighbor in graph[node]:',
+  '            if neighbor not in visited:',
+  '                visited.add(neighbor)',
+  '                order.append(neighbor)',
+  '                queue.append(neighbor)',
+  '            else:',
+  '                pass  # уже посещён — пропускаем',
+  '',
+  '    return order',
+];
+// какие строки подсвечивать для каждого типа шага (нумерация = CODE, с 1)
+const CODE_MAP = {
+  start:   { active: [2, 3, 4],          cursor: 4  },
+  dequeue: { active: [6, 7],             cursor: 7  },
+  enqueue: { active: [8, 9, 10, 11, 12], cursor: 12 },
+  skip:    { active: [8, 9, 13, 14],     cursor: 14 },
+  done:    { active: [16],               cursor: 16 },
+};
+// какие переменные «мигают» как изменённые на этом шаге
+const VARS_CHANGED = {
+  start:   ['visited', 'order', 'queue'],
+  dequeue: ['node', 'queue'],
+  enqueue: ['neighbor', 'visited', 'order', 'queue'],
+  skip:    ['neighbor'],
+  done:    [],
+};
+const KW = new Set(['def', 'while', 'for', 'in', 'if', 'else', 'not', 'return', 'pass']);
+const BI = new Set(['deque', 'append', 'popleft', 'add']);
+const codeLineEls = {};
+
+function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+// простая «подсветка синтаксиса»: ключевые слова, вызовы, комментарии
+function highlight(line) {
+  let code = line, comment = '';
+  const h = line.indexOf('#');
+  if (h !== -1) { code = line.slice(0, h); comment = line.slice(h); }
+  code = esc(code).replace(/[A-Za-z_]+/g, w => {
+    if (KW.has(w)) return `<span class="kw">${w}</span>`;
+    if (BI.has(w)) return `<span class="bi">${w}</span>`;
+    return w;
+  });
+  if (comment) code += `<span class="cm">${esc(comment)}</span>`;
+  return code || ' ';
+}
+
+function buildCode() {
+  const el = document.getElementById('code');
+  el.innerHTML = '';
+  CODE.forEach((line, i) => {
+    const n = i + 1;
+    const row = document.createElement('div');
+    row.className = 'code-line';
+    const gutter = document.createElement('span');
+    gutter.className = 'gutter';
+    gutter.innerHTML = `<span class="arrow">▶</span><span class="ln">${n}</span>`;
+    const txt = document.createElement('span');
+    txt.className = 'code-txt';
+    txt.innerHTML = highlight(line);
+    row.append(gutter, txt);
+    el.appendChild(row);
+    codeLineEls[n] = row;
+  });
+}
+
+function renderCode(step) {
+  const map = CODE_MAP[step.type] || { active: [], cursor: null };
+  for (const n in codeLineEls) {
+    const row = codeLineEls[n];
+    row.classList.toggle('active', map.active.includes(+n));
+    row.classList.toggle('cursor', +n === map.cursor);
+  }
+}
+
+function renderVars(step) {
+  const changed = VARS_CHANGED[step.type] || [];
+  const rows = [
+    ['node',     step.current ?? '—'],
+    ['neighbor', step.edge ? step.edge[1] : '—'],
+    ['queue',    '[' + step.queue.join(', ') + ']'],
+    ['visited',  '{' + [...step.visited].join(', ') + '}'],
+    ['order',    '[' + step.order.join(', ') + ']'],
+  ];
+  const v = document.getElementById('vars');
+  v.innerHTML = '<div class="vars-title">Переменные</div>';
+  rows.forEach(([name, val]) => {
+    const row = document.createElement('div');
+    row.className = 'var-row' + (changed.includes(name) ? ' changed' : '');
+    row.innerHTML = `<span class="var-name">${name}</span> <span class="var-val">= ${esc(String(val))}</span>`;
+    v.appendChild(row);
+  });
+}
+
+// ====== Управление ======
+let steps = [], idx = 0, timer = null;
+
+function load(start) {
+  stopPlay();
+  steps = buildSteps(start);
+  idx = 0;
+  update();
+}
+function update() {
+  render(steps[idx]);
+  renderLog();
+  renderCode(steps[idx]);
+  renderVars(steps[idx]);
+  document.getElementById('counter').textContent = `шаг ${idx + 1} из ${steps.length}`;
+  document.getElementById('prev').disabled = (idx === 0);
+  document.getElementById('next').disabled = (idx === steps.length - 1);
+}
+function next() { if (idx < steps.length - 1) { idx++; update(); } else stopPlay(); }
+function prev() { if (idx > 0) { idx--; update(); } }
+
+function play() {
+  if (idx === steps.length - 1) { idx = 0; update(); }
+  const speed = +document.getElementById('speed').value;
+  timer = setInterval(next, speed);
+  document.getElementById('play').textContent = '⏸ Пауза';
+}
+function stopPlay() {
+  if (timer) { clearInterval(timer); timer = null; }
+  document.getElementById('play').textContent = '▶ Авто';
+}
+function togglePlay() { timer ? stopPlay() : play(); }
+
+// ====== Инициализация ======
+drawGraph();
+buildCode();
+const startSel = document.getElementById('start');
+Object.keys(pos).forEach(n => {
+  const opt = document.createElement('option');
+  opt.value = n; opt.textContent = n;
+  startSel.appendChild(opt);
+});
+
+document.getElementById('next').onclick  = () => { stopPlay(); next(); };
+document.getElementById('prev').onclick  = () => { stopPlay(); prev(); };
+document.getElementById('play').onclick  = togglePlay;
+document.getElementById('reset').onclick = () => load(startSel.value);
+startSel.onchange = () => load(startSel.value);
+
+// клик по записи в истории — перейти к этому шагу
+document.getElementById('log').onclick = (e) => {
+  const entry = e.target.closest('.log-entry');
+  if (!entry) return;
+  stopPlay();
+  idx = +entry.dataset.idx;
+  update();
+};
+
+load('A');
+</script>
+</body>
+</html>
